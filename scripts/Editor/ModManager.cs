@@ -164,19 +164,20 @@ namespace NotoIto.KaiKaku
 
         private static bool IsHumanoid(GameObject go)
         {
-            var animator = go.GetComponent<Animator>();
-            if (animator == null)
-                return false;
-            var bones = GetBones(animator.avatar);
-            if (bones == null)
+            var bones = GetBones(go);
+            if (bones == null || bones.Count == 0)
                 return false;
             return true;
         }
 
-        private static Dictionary<string,string> GetBones(Avatar avatar)
+        private static Dictionary<string,string> GetBones(GameObject humanoidObject)
         {
-            var guids = AssetDatabase.FindAssets("t:Model", null);
             var dic = new Dictionary<string, string>();
+            var animator = humanoidObject.GetComponent<Animator>();
+            if (animator == null)
+                return dic;
+            var avatar = animator.avatar;
+            var guids = AssetDatabase.FindAssets("t:Model", null);
             foreach (var guid in guids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
@@ -187,6 +188,15 @@ namespace NotoIto.KaiKaku
                 {
                     var importer = AssetImporter.GetAtPath(path) as ModelImporter;
                     var human = importer.humanDescription.human;
+                    if (human.Length == 0)
+                    {
+                        Debug.Log("Reimported");
+                        AssetDatabase.ImportAsset(path, ImportAssetOptions.ImportRecursive);
+                        importer = AssetImporter.GetAtPath(path) as ModelImporter;
+                        human = importer.humanDescription.human;
+                        if (allModInfoListView.ContainsKey(avatar.name))
+                            allModInfoListView[avatarName][humanoidObject.GetInstanceID()].isHumanoid = true;
+                    }
                     foreach (var bone in human)
                     {
                         dic.Add(bone.humanName, bone.boneName);
@@ -277,7 +287,7 @@ namespace NotoIto.KaiKaku
 
         private static GameObject GetBoneObject(GameObject avatarObject, string rigName)
         {
-            var boneNames = GetBones(avatarObject.GetComponent<Animator>().avatar);
+            var boneNames = GetBones(avatarObject);
             var armatureGameObject = GetArmatureObject(avatarObject);
             if (boneNames[rigName] == "Armature")
                 return armatureGameObject;
@@ -286,7 +296,7 @@ namespace NotoIto.KaiKaku
 
         private static string GetRigName(GameObject avatarObject, string boneName)
         {
-            var boneNames = GetBones(avatarObject.GetComponent<Animator>().avatar);
+            var boneNames = GetBones(avatarObject);
             var str = "";
             try
             {

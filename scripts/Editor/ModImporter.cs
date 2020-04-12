@@ -17,12 +17,12 @@ namespace NotoIto.KaiKaku
         {
             ModelImporter modelImporter = (ModelImporter)assetImporter;
             if (obj.transform.Find("Armature") != null && modelImporter.animationType != ModelImporterAnimationType.Human)
-                ConvertToHumanoid();
+                ConvertToHumanoid(modelImporter);
         }
 
-        void ConvertToHumanoid()
+        void ConvertToHumanoid(ModelImporter modelImporter)
         {
-
+            modelImporter.animationType = ModelImporterAnimationType.Human;
         }
     }
 }
