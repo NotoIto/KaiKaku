@@ -36,6 +36,8 @@ namespace NotoIto.KaiKaku
 
         private static void SetSavedObject(string path, Dictionary<int, ModInfo> savedObject)
         {
+            if (!Directory.Exists(Path.GetDirectoryName(path)))
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
             using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write))
             {
                 BinaryFormatter bf = new BinaryFormatter();

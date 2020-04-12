@@ -73,11 +73,20 @@ namespace NotoIto.KaiKaku
                     if (SavedAvatarMod.Get(avatarName) != null)
                     {
                         allModInfoListView.Add(avatarName, SavedAvatarMod.Get(avatarName));
-                        allModInfoListViewOld.Add(avatarName, SavedAvatarMod.Get(avatarName));
                     }
                     else
                     {
                         allModInfoListView.Add(avatarName, new Dictionary<int, ModInfo>());
+                    }
+                }
+                if (!allModInfoListViewOld.ContainsKey(avatarName))
+                {
+                    if (SavedAvatarMod.Get(avatarName) != null)
+                    {
+                        allModInfoListViewOld.Add(avatarName, SavedAvatarMod.Get(avatarName));
+                    }
+                    else
+                    {
                         allModInfoListViewOld.Add(avatarName, new Dictionary<int, ModInfo>());
                     }
                 }
@@ -215,7 +224,7 @@ namespace NotoIto.KaiKaku
                 var modObject = child.gameObject;
                 ActivateMod(modObject);
             }
-            allModInfoListViewOld[avatarName] =  DeepClone(allModInfoListView[avatarName]);
+            allModInfoListViewOld[avatarName] = DeepClone(allModInfoListView[avatarName]);
         }
 
         private static void ActivateMod(GameObject go)
