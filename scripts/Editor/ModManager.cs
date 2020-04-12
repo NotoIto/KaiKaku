@@ -4,6 +4,8 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.Animations;
 using System.Linq;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace NotoIto.KaiKaku
 {
@@ -15,7 +17,8 @@ namespace NotoIto.KaiKaku
         private static string avatarName;
         private static bool avatarSelected = false;
         private static Vector2 scrollPos = Vector2.zero;
-        private static Dictionary<string, Dictionary<int, ModInfo>> allModInfoList = new Dictionary<string, Dictionary<int, ModInfo>>();
+        private static Dictionary<string, Dictionary<int, ModInfo>> allModInfoListViewOld = new Dictionary<string, Dictionary<int, ModInfo>>();
+        private static Dictionary<string, Dictionary<int, ModInfo>> allModInfoListView = new Dictionary<string, Dictionary<int, ModInfo>>();
         private static bool englishMode = false;
 
         [MenuItem("Tools/改変革命")]
@@ -55,7 +58,7 @@ namespace NotoIto.KaiKaku
 
         private void UpdateActiveObject()
         {
-            if (Selection.activeGameObject == null)
+            if (Selection.activeGameObject == null || !Selection.activeGameObject.activeInHierarchy)
             {
                 avatarSelected = false;
                 return;
@@ -65,12 +68,18 @@ namespace NotoIto.KaiKaku
             if (IsHumanoid(avatarObject))
             {
                 avatarName = avatarObject.GetComponent<Animator>().avatar.name;
-                if (!allModInfoList.ContainsKey(avatarName))
+                if (!allModInfoListView.ContainsKey(avatarName))
                 {
                     if (SavedAvatarMod.Get(avatarName) != null)
-                        allModInfoList.Add(avatarName, SavedAvatarMod.Get(avatarName));
+                    {
+                        allModInfoListView.Add(avatarName, SavedAvatarMod.Get(avatarName));
+                        allModInfoListViewOld.Add(avatarName, SavedAvatarMod.Get(avatarName));
+                    }
                     else
-                        allModInfoList.Add(avatarName, new Dictionary<int, ModInfo>());
+                    {
+                        allModInfoListView.Add(avatarName, new Dictionary<int, ModInfo>());
+                        allModInfoListViewOld.Add(avatarName, new Dictionary<int, ModInfo>());
+                    }
                 }
                 avatarSelected = true;
             }
@@ -90,11 +99,11 @@ namespace NotoIto.KaiKaku
             foreach (Transform child in GetModsObject().transform)
             {
                 var modObject = child.gameObject;
-                var modInfoList = allModInfoList[avatarName];
+                var modInfoList = allModInfoListView[avatarName];
 
                 if (!modInfoList.ContainsKey(modObject.GetInstanceID()))
                 {
-                    var mi = new ModInfo();
+                    var mi = new ModInfo() { isEnabled = true, autoSelectSource = true, isHumanoid = false };
                     if (IsHumanoid(modObject))
                         mi.isHumanoid = true;
                     modInfoList.Add(modObject.GetInstanceID(), mi);
@@ -190,17 +199,19 @@ namespace NotoIto.KaiKaku
 
         private static void Activate()
         {
-            SavedAvatarMod.Set(avatarName, allModInfoList[avatarName]);
+            SavedAvatarMod.Set(avatarName, allModInfoListView[avatarName]);
             foreach (Transform child in GetModsObject().transform)
             {
                 var modObject = child.gameObject;
                 ActivateMod(modObject);
             }
+            allModInfoListViewOld[avatarName] =  DeepClone(allModInfoListView[avatarName]);
         }
 
         private static void ActivateMod(GameObject go)
         {
             ModInfo mi = SavedAvatarMod.Get(avatarName)[go.GetInstanceID()];
+            ModInfo miOld = allModInfoListViewOld[avatarName][go.GetInstanceID()];
             if (!mi.isEnabled)
                 return;
             if (mi.isHumanoid)
@@ -210,11 +221,11 @@ namespace NotoIto.KaiKaku
                 bones.Add(armature);
                 foreach (var bone in bones)
                 {
-                    var constraint = bone.AddComponent<ParentConstraint>();
+                    var constraint = bone.GetComponent<ParentConstraint>();
                     if (constraint == null)
-                        constraint = bone.GetComponent<ParentConstraint>();
+                        constraint = bone.AddComponent<ParentConstraint>();
                     var rigName = GetRigName(go, bone.name);
-                    if (rigName == null)
+                    if (rigName == null || rigName == "")
                         continue;
                     var parentObject = GetBoneObject(avatarObject, rigName);
                     constraint.constraintActive = true;
@@ -235,20 +246,24 @@ namespace NotoIto.KaiKaku
             }
             else
             {
-                var constraint = go.AddComponent<ParentConstraint>();
+                var constraint = go.GetComponent<ParentConstraint>();
                 if (constraint == null)
-                    constraint = go.GetComponent<ParentConstraint>();
+                    constraint = go.AddComponent<ParentConstraint>();
                 if (mi.genericSourceObjectID != null)
                 {
                     var parentObject = (GameObject)EditorUtility.InstanceIDToObject((int)mi.genericSourceObjectID);
+                    var parentObjectOld = (GameObject)EditorUtility.InstanceIDToObject((int)miOld.genericSourceObjectID);
                     constraint.constraintActive = true;
                     ConstraintSource cs = default(ConstraintSource);
                     cs.weight = 1.0f;
                     cs.sourceTransform = parentObject.transform;
+                    ConstraintSource cs1 = default(ConstraintSource);
+                    cs1.weight = 1.0f;
+                    cs1.sourceTransform = parentObjectOld.transform;
                     for (int i = 0; i < constraint.sourceCount; i++)
                     {
                         ConstraintSource cs2 = constraint.GetSource(i);
-                        if (cs2.sourceTransform == cs.sourceTransform && cs2.weight == cs.weight)
+                        if (cs2.sourceTransform == cs1.sourceTransform && cs2.weight == cs1.weight)
                         {
                             constraint.RemoveSource(i);
                             break;
@@ -324,6 +339,18 @@ namespace NotoIto.KaiKaku
             {
                 allChildren.Add(ob.gameObject);
                 GetChildren(ob.gameObject, ref allChildren);
+            }
+        }
+
+        public static T DeepClone<T>(T obj)
+        {
+            using (var ms = new MemoryStream())
+            {
+                var formatter = new BinaryFormatter();
+                formatter.Serialize(ms, obj);
+                ms.Position = 0;
+
+                return (T)formatter.Deserialize(ms);
             }
         }
     }
