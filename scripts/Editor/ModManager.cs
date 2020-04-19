@@ -179,7 +179,7 @@ namespace NotoIto.KaiKaku
             return true;
         }
 
-        private static Dictionary<string,string> GetBones(GameObject humanoidObject)
+        private static Dictionary<string, string> GetBones(GameObject humanoidObject)
         {
             var dic = new Dictionary<string, string>();
             var animator = humanoidObject.GetComponent<Animator>();
@@ -230,7 +230,9 @@ namespace NotoIto.KaiKaku
         private static void ActivateMod(GameObject go)
         {
             ModInfo mi = SavedAvatarMod.Get(avatarName)[go.GetInstanceID()];
-            ModInfo miOld = allModInfoListViewOld[avatarName][go.GetInstanceID()];
+            ModInfo miOld = null;
+            if (allModInfoListViewOld.ContainsKey(avatarName) && allModInfoListViewOld[avatarName].ContainsKey(go.GetInstanceID()))
+                miOld = allModInfoListViewOld[avatarName][go.GetInstanceID()];
             if (!mi.isEnabled)
                 return;
             if (mi.isHumanoid)
@@ -271,21 +273,26 @@ namespace NotoIto.KaiKaku
                 if (mi.genericSourceObjectID != null)
                 {
                     var parentObject = (GameObject)EditorUtility.InstanceIDToObject((int)mi.genericSourceObjectID);
-                    var parentObjectOld = (GameObject)EditorUtility.InstanceIDToObject((int)miOld.genericSourceObjectID);
+                    GameObject parentObjectOld = null;
+                    if (miOld != null)
+                        parentObjectOld = (GameObject)EditorUtility.InstanceIDToObject((int)miOld.genericSourceObjectID);
                     constraint.constraintActive = true;
                     ConstraintSource cs = default(ConstraintSource);
                     cs.weight = 1.0f;
                     cs.sourceTransform = parentObject.transform;
-                    ConstraintSource cs1 = default(ConstraintSource);
-                    cs1.weight = 1.0f;
-                    cs1.sourceTransform = parentObjectOld.transform;
-                    for (int i = 0; i < constraint.sourceCount; i++)
+                    if (parentObjectOld != null)
                     {
-                        ConstraintSource cs2 = constraint.GetSource(i);
-                        if (cs2.sourceTransform == cs1.sourceTransform && cs2.weight == cs1.weight)
+                        ConstraintSource cs1 = default(ConstraintSource);
+                        cs1.weight = 1.0f;
+                        cs1.sourceTransform = parentObjectOld.transform;
+                        for (int i = 0; i < constraint.sourceCount; i++)
                         {
-                            constraint.RemoveSource(i);
-                            break;
+                            ConstraintSource cs2 = constraint.GetSource(i);
+                            if (cs2.sourceTransform == cs1.sourceTransform && cs2.weight == cs1.weight)
+                            {
+                                constraint.RemoveSource(i);
+                                break;
+                            }
                         }
                     }
                     constraint.AddSource(cs);
