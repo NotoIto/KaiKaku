@@ -20,6 +20,7 @@ namespace NotoIto.KaiKaku
         private static Dictionary<string, Dictionary<int, ModInfo>> allModInfoListViewOld = new Dictionary<string, Dictionary<int, ModInfo>>();
         private static Dictionary<string, Dictionary<int, ModInfo>> allModInfoListView = new Dictionary<string, Dictionary<int, ModInfo>>();
         private static bool englishMode = false;
+        private static Dictionary<string, string> changedObjectPathList = new Dictionary<string, string>();
 
         [MenuItem("Tools/改変革命")]
         private static void Open()
@@ -103,7 +104,7 @@ namespace NotoIto.KaiKaku
         {
             var defaultColor = GUI.backgroundColor;
             scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-            EditorGUILayout.LabelField("MODS", new GUIStyle() { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
+            EditorGUILayout.LabelField("MODELS", new GUIStyle() { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
             EditorGUILayout.BeginVertical(GUI.skin.box);
             foreach (Transform child in GetModsObject().transform)
             {
@@ -136,7 +137,7 @@ namespace NotoIto.KaiKaku
                     if (modInfo.autoSelectSource)
                     {
                         GUI.enabled = false;
-                        var bones = GetAllChildren(GetArmatureObject(avatarObject));
+                        var bones = GetAllChildren(GetHipsObject(avatarObject));
                         GameObject nearestBone = bones.OrderByDescending(b => Vector3.Distance(b.transform.position, modObject.transform.position)).LastOrDefault();
                         if (nearestBone != null)
                             modInfo.genericSourceObjectID = nearestBone.GetInstanceID();
@@ -168,7 +169,7 @@ namespace NotoIto.KaiKaku
 
         private static bool IsInstalled()
         {
-            return avatarTransform.Find("Mods") != null;
+            return avatarTransform.Find("Models") != null;
         }
 
         private static bool IsHumanoid(GameObject go)
@@ -237,23 +238,34 @@ namespace NotoIto.KaiKaku
                 return;
             if (mi.isHumanoid)
             {
-                var armature = GetArmatureObject(go);
+                var armature = GetHipsObject(go);
                 var bones = GetAllChildren(armature);
                 bones.Add(armature);
+                var changedObjectKeys = bones.Select(b => GetHierarchyPath(b.transform, go.transform.parent)).ToArray();
                 foreach (var bone in bones)
                 {
-                    var constraint = bone.GetComponent<ParentConstraint>();
-                    if (constraint == null)
-                        constraint = bone.AddComponent<ParentConstraint>();
                     var rigName = GetRigName(go, bone.name);
                     if (rigName == null || rigName == "")
                         continue;
+                    dynamic constraint;
+                    if (rigName == "Hips")
+                    {
+                        constraint = bone.GetComponent<ParentConstraint>();
+                        if (constraint == null)
+                            constraint = bone.AddComponent<ParentConstraint>();
+                    }
+                    else
+                    {
+                        constraint = bone.GetComponent<RotationConstraint>();
+                        if (constraint == null)
+                            constraint = bone.AddComponent<RotationConstraint>();
+                    }
                     var parentObject = GetBoneObject(avatarObject, rigName);
                     constraint.constraintActive = true;
                     ConstraintSource cs = default(ConstraintSource);
                     cs.weight = 1.0f;
                     cs.sourceTransform = parentObject.transform;
-                    for(int i = 0; i < constraint.sourceCount; i++)
+                    for (int i = 0; i < constraint.sourceCount; i++)
                     {
                         ConstraintSource cs2 = constraint.GetSource(i);
                         if (cs2.sourceTransform == cs.sourceTransform && cs2.weight == cs.weight)
@@ -263,7 +275,13 @@ namespace NotoIto.KaiKaku
                         }
                     }
                     constraint.AddSource(cs);
+                    bone.name = "_" + bone.name;
                 }
+                for (int i = 0; i < bones.Count; i++)
+                {
+                    changedObjectPathList.Add(changedObjectKeys[i], GetHierarchyPath(bones[i].transform, go.transform.parent));
+                }
+                ConvertAvatarAnimationClips(go);
             }
             else
             {
@@ -301,13 +319,85 @@ namespace NotoIto.KaiKaku
 
         }
 
+        private static void ConvertAvatarAnimationClips(GameObject go)
+        {
+            AssetDatabase.Refresh();
+            var avatarDescriptor = go.GetComponent<VRCSDK2.VRC_AvatarDescriptor>();
+            if (avatarDescriptor == null)
+                return;
+            var animationOverrideStanding = avatarDescriptor.CustomStandingAnims;
+            var animationOverrideSitting = avatarDescriptor.CustomSittingAnims;
+            AnimatorOverrideController newAnimationOverrideStanding = new AnimatorOverrideController(animationOverrideStanding.runtimeAnimatorController);
+            AnimatorOverrideController newAnimationOverrideSitting = new AnimatorOverrideController(animationOverrideSitting.runtimeAnimatorController);
+
+            var standingClips = new List<KeyValuePair<AnimationClip, AnimationClip>>();
+            animationOverrideStanding.GetOverrides(standingClips);
+            var sittingClips = new List<KeyValuePair<AnimationClip, AnimationClip>>();
+            animationOverrideSitting.GetOverrides(sittingClips);
+            var newStandingClips = new List<AnimationClipPair>();
+            var newSittingClips = new List<AnimationClipPair>();
+            foreach (var clip in standingClips)
+            {
+                var newClip = ConvertClip(go, clip.Value);
+                if (newClip != null)
+                    newStandingClips.Add(new AnimationClipPair() { overrideClip = newClip, originalClip = clip.Key });
+            }
+            foreach (var clip in sittingClips)
+            {
+                var newClip = ConvertClip(go, clip.Value);
+                if (newClip != null)
+                    newSittingClips.Add(new AnimationClipPair() { overrideClip = newClip, originalClip = clip.Key });
+            }
+            newAnimationOverrideStanding.clips = newStandingClips.ToArray();
+            newAnimationOverrideSitting.clips = newSittingClips.ToArray();
+            AssetDatabase.CreateAsset(
+                newAnimationOverrideStanding,
+                AssetDatabase.GenerateUniqueAssetPath("Assets/NotoIto/KaiKaku/saved/KK_" + animationOverrideStanding.name + ".overrideController")
+                );
+            AssetDatabase.CreateAsset(
+                newAnimationOverrideSitting,
+                AssetDatabase.GenerateUniqueAssetPath("Assets/NotoIto/KaiKaku/saved/KK_" + animationOverrideSitting.name + ".overrideController")
+                );
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+        }
+
+        private static AnimationClip ConvertClip(GameObject go, AnimationClip clip)
+        {
+            if (clip == null)
+            {
+                return null;
+            }
+            else if(AssetDatabase.GetMainAssetTypeAtPath("Assets/NotoIto/KaiKaku/saved/KK_" + clip.name + ".anim") != null)
+            {
+                return (AnimationClip)AssetDatabase.LoadAssetAtPath("Assets/NotoIto/KaiKaku/saved/KK_" + clip.name + ".anim", typeof(AnimationClip));
+            }
+            var newClip = new AnimationClip();
+            var curveBindings = AnimationUtility.GetCurveBindings(clip);
+            foreach (var curveBinding in curveBindings)
+            {
+                var curve = AnimationUtility.GetEditorCurve(clip, curveBinding);
+                var curveBindingPath = changedObjectPathList.ContainsKey(go.name + "/" + curveBinding.path) ?
+                    "Models/" + changedObjectPathList[go.name + "/" + curveBinding.path] :
+                    "Models/" + go.name + "/" + curveBinding.path;
+                EditorCurveBinding newCurveBinding = new EditorCurveBinding();
+                newCurveBinding.path = curveBindingPath;
+                newCurveBinding.type = curveBinding.type;
+                newCurveBinding.propertyName = curveBinding.propertyName;
+                AnimationUtility.SetEditorCurve(newClip, newCurveBinding, curve);
+            }
+            newClip.name = "KK_" + clip.name;
+            AssetDatabase.CreateAsset(
+                newClip,
+                AssetDatabase.GenerateUniqueAssetPath("Assets/NotoIto/KaiKaku/saved/" + newClip.name + ".anim")
+                );
+            return newClip;
+        }
+
         private static GameObject GetBoneObject(GameObject avatarObject, string rigName)
         {
             var boneNames = GetBones(avatarObject);
-            var armatureGameObject = GetArmatureObject(avatarObject);
-            if (boneNames[rigName] == "Armature")
-                return armatureGameObject;
-            return GetAllChildren(armatureGameObject).First(x => x.name == boneNames[rigName]);
+            return GetAllChildren(avatarObject).First(x => x.name == boneNames[rigName]);
         }
 
         private static string GetRigName(GameObject avatarObject, string boneName)
@@ -325,24 +415,19 @@ namespace NotoIto.KaiKaku
             return str;
         }
 
-        private static GameObject GetArmatureObject(GameObject avatarObject)
+        private static GameObject GetHipsObject(GameObject avatarObject)
         {
-            foreach (Transform child in avatarObject.transform)
-            {
-                if (child.gameObject.name == "Armature")
-                    return child.gameObject;
-            }
-            return null;
+            return GetBoneObject(avatarObject, "Hips");
         }
 
         private static GameObject GetModsObject()
         {
             foreach (Transform child in avatarObject.transform)
             {
-                if (child.gameObject.name == "Mods")
+                if (child.gameObject.name == "Models")
                     return child.gameObject;
             }
-            var go = new GameObject("Mods");
+            var go = new GameObject("Models");
             go.transform.parent = avatarObject.transform;
             return go;
         }
@@ -350,7 +435,8 @@ namespace NotoIto.KaiKaku
         private static List<GameObject> GetAllChildren(GameObject obj)
         {
             List<GameObject> allChildren = new List<GameObject>();
-            GetChildren(obj, ref allChildren);
+            if (obj != null)
+                GetChildren(obj, ref allChildren);
             return allChildren;
         }
 
@@ -363,6 +449,8 @@ namespace NotoIto.KaiKaku
             }
             foreach (Transform ob in children)
             {
+                if (ob == GetModsObject().transform)
+                    continue;
                 allChildren.Add(ob.gameObject);
                 GetChildren(ob.gameObject, ref allChildren);
             }
@@ -378,6 +466,18 @@ namespace NotoIto.KaiKaku
 
                 return (T)formatter.Deserialize(ms);
             }
+        }
+
+        private static string GetHierarchyPath(Transform self, Transform root)
+        {
+            string path = self.gameObject.name;
+            Transform parent = self.parent;
+            while (parent != null && parent != root)
+            {
+                path = parent.name + "/" + path;
+                parent = parent.parent;
+            }
+            return path;
         }
     }
 
